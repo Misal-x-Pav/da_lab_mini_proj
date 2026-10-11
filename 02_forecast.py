@@ -29,7 +29,7 @@ ALLOW_NAIVE_AS_FINAL = False
 # Which countries to model (ISO3 codes). Set COUNTRIES = None to run all ~188 countries (~3 min).
 # Germany stands in for the whole euro area (same currency); USA is excluded because its rate is always 1.
 COUNTRIES = ["IND", "CHN", "JPN", "GBR", "DEU", "BRA", "RUS", "CAN", "AUS", "KOR",
-             "MEX", "IDN", "TUR", "ZAF", "NGA", "ARG", "EGY", "CHE", "THA", "PAK"]
+            "MEX", "IDN", "TUR", "ZAF", "NGA", "ARG", "EGY", "CHE", "THA", "PAK"]
 
 df = pd.read_csv("data/exchange_rate_long.csv", parse_dates=["date"])
 
@@ -43,7 +43,7 @@ def fit(y, order, seasonal=(0, 0, 0, 0)):
     # trend only when d == 0 (a constant); with d == 1 a drift would be too aggressive
     trend = "c" if order[1] == 0 and seasonal[1] == 0 else "n"
     return SARIMAX(y, order=order, seasonal_order=seasonal, trend=trend,
-                   enforce_stationarity=False, enforce_invertibility=False).fit(disp=False, maxiter=100)
+                enforce_stationarity=False, enforce_invertibility=False).fit(disp=False, maxiter=100)
 
 def best_order(y, d):
     best, best_aic = (1, d, 1), np.inf
@@ -67,7 +67,7 @@ def process(country, iso3, g):
     future_idx = pd.date_range(y.index[-1] + pd.offsets.MonthBegin(1), periods=HORIZON, freq="MS")
 
     hist = pd.DataFrame({"country": country, "iso3": iso3, "date": y.index, "rate": rate,
-                         "is_forecast": False, "model": "actual"})
+                        "is_forecast": False, "model": "actual"})
 
     # constant series (e.g. hard pegs) -> nothing to model
     if np.ptp(rate) < 1e-9 * abs(rate[0]):

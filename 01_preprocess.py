@@ -2,25 +2,12 @@
 Step 1 - Preprocessing (pandas)
 Input : World Bank GEM 'Official exchange rate (LCU per USD, period average)' xlsx, sheet 'monthly'
 Output: data/exchange_rate_long.csv   tidy table: country, iso3, date, rate, pct_change_mom, yoy_pct,
-                                      index_100, outlier_z, outlier_iqr
+                                    index_100, outlier_z, outlier_iqr
         data/preprocess_report.csv    what was kept / dropped / filled for every country
         data/outlier_report.csv       outlier counts per country (Z-score and IQR)
-        data/analysis/*.csv           small summary tables (group-by, pivot, ranking)
-
-Lab experiments used here (and how they were adapted to a TIME SERIES)
-  Task 1-2  head/tail, shape, columns, dtypes, info, describe ......... section 1 and 8 (EDA)
-  Task 3    missing values + duplicates ............................... sections 2-4
-            (mean-filling is only compared; the series is filled by interpolation instead)
-  Outlier check found a source-data typo (Antigua Jul 2019 = 2019.6 instead of 2.7) -> spike correction, sec. 2
-  Linear vs polynomial interpolation experiment ....................... section 3 (back-test)
-  Z-score and IQR outlier detection ................................... section 6
-            (rows are FLAGGED, not deleted: removing months would break the monthly sequence ARIMA needs,
-             and the extreme values here are real devaluations, not data errors)
-  Task 4-5  filtering and sorting ..................................... section 7
-  Task 6    new columns (percentage, index) ........................... section 5
-  Task 7-8  group-by and pivot table .................................. section 7
-  Task 9    insights (computed from the data, not hard-coded) ......... section 8
+        data/analysis/gap_fill_backtest.csv   result of the interpolation back-test
 """
+
 import warnings; warnings.filterwarnings("ignore")
 import numpy as np
 import pandas as pd
@@ -103,7 +90,7 @@ for c in spike_count[spike_count > 0].index:
         log(f"  spike corrected: {c} {d:%Y-%m} had {raw.loc[d, c]:.2f} (neighbours about {raw[c].shift(1)[d]:.2f})")
 raw = raw.mask(spikes)                      # a spike is treated as a missing value and filled below
 miss = raw.isna().sum()
-log("Missing cells (incl. spikes):", int(miss.sum()), "| countries with any gap:", int((miss > 0).sum()),
+log("Missing cells:", int(miss.sum()), "| countries with any gap:", int((miss > 0).sum()),
     "| countries with > MAX_MISSING:", int((miss > MAX_MISSING).sum()))
 
 # =====================================================================
@@ -208,10 +195,10 @@ long["outlier_iqr"] = (((long["pct_change_mom"] < q1 - IQR_FACTOR * iqr) |
                         (long["pct_change_mom"] > q3 + IQR_FACTOR * iqr)) & (iqr > 0)).astype(int)  # iqr=0: pegged
 
 out_rep = (long.assign(abs_move=long["pct_change_mom"].abs())
-            .groupby(["country", "iso3"])
-            .agg(outliers_z=("outlier_z", "sum"), outliers_iqr=("outlier_iqr", "sum"),
+               .groupby(["country", "iso3"])
+               .agg(outliers_z=("outlier_z", "sum"), outliers_iqr=("outlier_iqr", "sum"),
                     largest_monthly_move_pct=("pct_change_mom", lambda s: s.loc[s.abs().idxmax()] if s.notna().any() else np.nan))
-            .reset_index())
+               .reset_index())
 out_rep.to_csv(OUT / "outlier_report.csv", index=False)
 
 section("6. Outliers in monthly % change (flagged, not removed)")
@@ -225,55 +212,18 @@ for _, r in big.iterrows():
     log(f"  {r['country']:<22} {r['date']:%Y-%m}  {r['pct_change_mom']:+7.1f} %")
 
 # =====================================================================
-# 7. Filtering, sorting, group-by, pivot (lab Tasks 4, 5, 7, 8)
+# 7. Final checks, insights (Task 9) and save
 # =====================================================================
-section("7. Summary analysis")
-long["year"] = long["date"].dt.year
-long["month"] = long["date"].dt.month
-
-# Task 4 filter: months where a currency moved more than 10 % in one month
-big_moves = long[long["pct_change_mom"].abs() > 10]
-log(f"Months with a move > 10 %: {len(big_moves)} (in {big_moves['country'].nunique()} countries)")
-
-# Task 5 sort: currencies that weakened most since Jan 2015
-last = long[long["date"] == long["date"].max()]
-weakest = last.sort_values("index_100", ascending=False)[["country", "iso3", "rate", "index_100"]].head(10)
-weakest.to_csv(OUT / "analysis" / "weakest_currencies.csv", index=False)
-log("Weakest vs USD since Jan 2015 (index, Jan 2015 = 100):")
-for _, r in weakest.head(5).iterrows():
-    log(f"  {r['country']:<22} {r['index_100']:10.1f}")
-
-# Task 7 group-by: typical (median) 12-month change per year, and share of currencies that weakened
-by_year = long.dropna(subset=["yoy_pct"]).groupby("year").agg(
-    median_yoy_pct=("yoy_pct", "median"),
-    pct_currencies_weakened=("yoy_pct", lambda s: (s > 0).mean() * 100)).round(2)
-by_year.to_csv(OUT / "analysis" / "yearly_summary.csv")
-log("Median 12-month change by year (all countries):")
-log(by_year.to_string())
-
-# Task 8 pivot: median monthly change by year (rows) x calendar month (columns) -> is there seasonality?
-pivot = long.pivot_table(values="pct_change_mom", index="year", columns="month", aggfunc="median").round(2)
-pivot.to_csv(OUT / "analysis" / "pivot_year_by_month.csv")
-by_month = pivot.median()
-log("Median monthly change by calendar month (flat = little seasonality):")
-log("  " + "  ".join(f"{m:>2}:{v:+.2f}" for m, v in by_month.items()))
-
-long = long.drop(columns=["year", "month"])
-
-# =====================================================================
-# 8. Final checks, insights (Task 9) and save
-# =====================================================================
-section("8. Final table and insights")
+section("7. Final table and insights")
 if VERBOSE:
     long.info()
     print(long[["rate", "pct_change_mom", "yoy_pct", "index_100"]].describe().round(2).to_string())
-top = weakest.iloc[0]
+last = long[long["date"] == long["date"].max()]
+top = last.loc[last["index_100"].idxmax()]
 log("Insights (calculated from the data):")
 log(f"  1. {top['country']} had the biggest depreciation vs USD since Jan 2015 (index {top['index_100']:.0f}).")
 log(f"  2. {int(long['outlier_z'].sum())} Z-score outlier months, mostly genuine devaluations; "
     f"{int(spike_count.sum())} data-entry spike(s) were corrected instead of kept.")
-log(f"  3. Median calendar-month change ranges only {by_month.min():+.2f} to {by_month.max():+.2f} %: seasonality looks weak.")
-log(f"  4. In {int(by_year['median_yoy_pct'].idxmax())} the typical currency weakened most ({by_year['median_yoy_pct'].max():+.2f} %).")
 
 long.to_csv(OUT / "exchange_rate_long.csv", index=False)
 pd.DataFrame(report, columns=["country", "missing_months", "decision"]).to_csv(OUT / "preprocess_report.csv", index=False)
