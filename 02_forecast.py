@@ -9,7 +9,8 @@ Method per country
   2. ADF test -> d = 0 if stationary else 1.
   3. Small AIC grid for (p, q) in {0,1,2}; same (p,d,q) reused for SARIMA with seasonal (0,1,1,12).
   4. Train on all but the last 12 months, score on the last 12 (RMSE, MAPE on the original scale).
-  5. Pick the lowest-MAPE model among Naive / ARIMA / SARIMA, refit on ALL data, forecast 12 months.
+  5. Pick the lower-MAPE model of ARIMA vs SARIMA (Naive is scored only as a benchmark, unless
+     ALLOW_NAIVE_AS_FINAL = True), refit it on ALL data, forecast 12 months with a 95% interval.
 """
 import os, warnings, itertools
 import numpy as np
